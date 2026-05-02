@@ -99,7 +99,7 @@ PRs welcome. The four design notes above are load-bearing — if you change them
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+[The Unlicense](LICENSE) — public domain. Use it anywhere, for anything, no attribution required.
 
 ## Credits
 
