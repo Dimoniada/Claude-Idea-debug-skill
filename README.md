@@ -46,6 +46,16 @@ Triggering IntelliJ from a Claude Code subprocess on Windows runs into several n
 
    The skill will print a HINT pointing you here if it can't find the log after a run.
 
+## Configuration
+
+The keyboard shortcut sent to IntelliJ is configurable. Default is `Shift+F9` (IntelliJ's "Re-run Debug").
+
+- **Config file:** `%APPDATA%\idea-debug-skill\config.json` — created on first run, edit `KeyCombo` to change.
+- **One-off override:** pass `-KeyCombo` to the script, e.g. `-KeyCombo "+%{F10}"` for `Shift+Alt+F10`.
+- **SendKeys notation:** `+` = Shift, `%` = Alt, `^` = Ctrl. So `Shift+Alt+F10` → `+%{F10}`, `Ctrl+F9` → `^{F9}`.
+
+On the first run Claude will ask you which shortcut you use, and update the config for you.
+
 ## Usage
 
 In a Claude Code session opened at your project folder:

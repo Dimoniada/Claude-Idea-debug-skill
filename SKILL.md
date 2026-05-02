@@ -30,7 +30,27 @@ Do not use `& "...ps1"` — that subjects the script to the system's execution p
 
 The `-File` parameter inherits the parent shell's working directory, so `$PWD` inside the script resolves to the user's project folder. `$PSScriptRoot` resolves to the skill's `scripts/` folder, so it correctly finds `Chase-DebugProcess.ps1` and `WinApi.ps1`.
 
-No env vars. No questions to ask.
+## Configuration
+
+The skill remembers which IntelliJ keyboard shortcut to send between runs.
+
+- Config file: `%APPDATA%\idea-debug-skill\config.json`
+- Default: `+{F9}` (Shift+F9 — IntelliJ's default "Re-run Debug")
+- SendKeys notation: `+` = Shift, `%` = Alt, `^` = Ctrl. Examples: `+%{F10}` = Shift+Alt+F10, `^{F9}` = Ctrl+F9.
+
+**On the first run**, the script creates the config with the default and prints lines starting with `[idea-debug] First-run:`. When you see those, **ask the user**:
+
+> "First-run config for idea-debug created. Default shortcut is Shift+F9 (`+{F9}`). What's your IntelliJ shortcut for 'Re-run last debug configuration'? Reply 'keep default' to use Shift+F9, or tell me your shortcut (e.g. 'Shift+Alt+F10' or 'Ctrl+F9')."
+
+If they answer with a different shortcut, translate it to SendKeys notation and update the config:
+
+```powershell
+@{ KeyCombo = "<their-keycombo>" } | ConvertTo-Json | Out-File "$env:APPDATA\idea-debug-skill\config.json" -Encoding UTF8
+```
+
+Then re-invoke the skill so it uses the new value.
+
+A user can also override per-call without changing the config: pass `-KeyCombo "+%{F10}"` to the script.
 
 ## What the script does
 
