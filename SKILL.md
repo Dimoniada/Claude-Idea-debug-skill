@@ -30,27 +30,37 @@ Do not use `& "...ps1"` — that subjects the script to the system's execution p
 
 The `-File` parameter inherits the parent shell's working directory, so `$PWD` inside the script resolves to the user's project folder. `$PSScriptRoot` resolves to the skill's `scripts/` folder, so it correctly finds `Chase-DebugProcess.ps1` and `WinApi.ps1`.
 
-## Configuration
+## Configuration (you, Claude, manage this in memory)
 
-The skill remembers which IntelliJ keyboard shortcut to send between runs.
+The script accepts a `-KeyDebug` parameter in WshShell.SendKeys notation: `+` = Shift, `%` = Alt, `^` = Ctrl. Examples: `+{F9}` = Shift+F9, `+%{F10}` = Shift+Alt+F10, `^{F9}` = Ctrl+F9. The script's default is `+{F9}` (IntelliJ's stock "Re-run Debug").
 
-- Config file: `%APPDATA%\idea-debug-skill\config.json`
-- Default: `+{F9}` (Shift+F9 — IntelliJ's default "Re-run Debug")
-- SendKeys notation: `+` = Shift, `%` = Alt, `^` = Ctrl. Examples: `+%{F10}` = Shift+Alt+F10, `^{F9}` = Ctrl+F9.
+**The user's preferred shortcut lives in your memory file `idea-debug-prefs.md`** (in the same `memory/` folder as your other project memory files). Format:
 
-**On the first run**, the script creates the config with the default and prints lines starting with `[idea-debug] First-run:`. When you see those, **ask the user**:
+```
+---
+name: idea-debug user preferences
+description: User's preferred IntelliJ keyboard shortcut for /idea-debug
+type: project
+---
 
-> "First-run config for idea-debug created. Default shortcut is Shift+F9 (`+{F9}`). What's your IntelliJ shortcut for 'Re-run last debug configuration'? Reply 'keep default' to use Shift+F9, or tell me your shortcut (e.g. 'Shift+Alt+F10' or 'Ctrl+F9')."
-
-If they answer with a different shortcut, translate it to SendKeys notation and update the config:
-
-```powershell
-@{ KeyCombo = "<their-keycombo>" } | ConvertTo-Json | Out-File "$env:APPDATA\idea-debug-skill\config.json" -Encoding UTF8
+KeyDebug: +{F9}
 ```
 
-Then re-invoke the skill so it uses the new value.
+**Protocol on every invocation of `/idea-debug`:**
 
-A user can also override per-call without changing the config: pass `-KeyCombo "+%{F10}"` to the script.
+1. **Before running the script**, check whether `idea-debug-prefs.md` exists in your project memory.
+2. **If it exists**, parse the `KeyDebug:` line and pass it as `-KeyDebug "<value>"` to the script.
+3. **If it does NOT exist** (first run for this project), do NOT run the script yet. Instead, ask the user:
+
+   > "I haven't seen idea-debug used in this project before. The default IntelliJ shortcut for 'Re-run Debug' is Shift+F9 (`+{F9}`). Reply 'keep default' to use it, or tell me your shortcut (e.g. 'Shift+Alt+F10', 'Ctrl+F9')."
+
+   When they answer:
+   - Translate their answer to SendKeys notation (`Shift+Alt+F10` → `+%{F10}`, etc.)
+   - Create `idea-debug-prefs.md` with the chosen value
+   - Add a line to `MEMORY.md` index: `- [idea-debug-prefs](idea-debug-prefs.md) — IntelliJ keyboard shortcut for the idea-debug skill`
+   - Then run the script with `-KeyDebug "<value>"`
+
+4. **If the user later asks to change the shortcut**, update `idea-debug-prefs.md` and use the new value next invocation.
 
 ## What the script does
 
