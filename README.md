@@ -15,8 +15,8 @@ You're in Claude Code, you've been editing Java code in IntelliJ. You type:
 Behind the scenes, the skill:
 
 1. Brings IntelliJ to the foreground.
-2. Sends `Shift+F9` (re-run last config — works for both run and debug).
-3. Waits for IntelliJ to write a new test-results XML.
+2. Sends `Debug` shortcut (default is Shift+F9, re-run last config — works for both run and debug).
+3. Waits for the test-runner JVM to exit (no timeout, with a 10s heartbeat for long suites).
 4. Reads the console log file (`debug-capture.log`) IntelliJ wrote during the run.
 5. Parses the JUnit XML and prints `[PASS]` / `[FAIL]` per test with stderr.
 6. Minimizes IntelliJ so Claude Code surfaces again — without disturbing your Alt+Tab order.
@@ -48,6 +48,8 @@ Triggering IntelliJ from a Claude Code subprocess on Windows runs into several n
 
 ## Configuration
 
+### Shortcut
+
 Default IntelliJ shortcut: `Shift+F9` (IntelliJ's stock "Re-run Debug").
 
 **Per-conversation prompt:** the first time you invoke `/idea-debug` in a Claude conversation, Claude asks which shortcut to use. The answer is remembered for the rest of that conversation, then forgotten. Each new conversation asks again — useful if you debug different things with different shortcuts.
@@ -59,6 +61,18 @@ powershell -ExecutionPolicy Bypass -File "...\Debug-And-Capture.ps1" -KeyDebug "
 ```
 
 **SendKeys notation:** `+` = Shift, `%` = Alt, `^` = Ctrl. So `Shift+Alt+F10` → `+%{F10}`, `Ctrl+F9` → `^{F9}`.
+
+### Detection window (`-DetectionWindowSec`, default 30)
+
+After sending the keystroke, the chaser waits up to N seconds for IntelliJ to spawn the test-runner JVM (a `java.exe` whose command-line includes `idea_rt.jar`). Once detected, it waits for that JVM to exit — **with no timeout** — so long-running suites are fine. A heartbeat line is printed every 10 seconds while the test is running.
+
+If your IntelliJ takes longer than 30s to even start the JVM (cold-start projects, slow disk, large classpath), raise the window:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "...\Debug-And-Capture.ps1" -DetectionWindowSec 60
+```
+
+If the chaser fails with `no IntelliJ test runner detected within Ns`, that means the keystroke didn't actually launch a run (a modal dialog ate it, or no run config is selected, or focus was wrong). Try invoking the run manually in IntelliJ first.
 
 ## Usage
 
@@ -80,11 +94,13 @@ When PowerShell runs as a subprocess of Claude Code, it doesn't have interactive
 
 **Fix:** write a 2-line `.vbs` to `$env:TEMP` and invoke it via `wscript.exe`. `wscript.exe` runs at the top of the process tree, which gives it interactive access.
 
-### 2. Process detection: watch testHistory XML, not `java.exe` spawns
+### 2. Process detection: filter `java.exe` by classpath AND exclude IntelliJ infrastructure
 
-Naively, you'd watch for new `java.exe` processes via WMI to detect a test run. But IntelliJ reuses an existing JVM as a test-runner daemon — no new process spawns when you re-run tests. The WMI watcher would never fire.
+IntelliJ does spawn a fresh `java.exe` per test/run with `idea_rt.jar` in its classpath. So in principle you can watch for that. The catch: IntelliJ's own daemons — JPS BuildMain (`jps-launcher.jar`), Maven server, Kotlin daemon, JpsBootstrap — also include `idea_rt.jar` in their classpath, AND they're long-living. Naive detection picks up the build daemon and hangs forever waiting for it to exit.
 
-**Fix:** snapshot existing `*.xml` files in `%LOCALAPPDATA%\JetBrains\IntelliJIdea*\testHistory\*\*.xml` before sending Shift+F9, then poll for any new or modified XML.
+**Fix:** filter `java.exe` whose cmdline matches `idea_rt.jar` AND does NOT match `BuildMain|jps-launcher|RemoteMavenServer|kotlin\.daemon|MavenServerCmdReader|JpsBootstrap`. Wait for that process to exit (no timeout, heartbeat every 10s). Snapshot existing testHistory XMLs as a fallback for sub-second tests where the JVM exits between polls.
+
+**Bonus design rule:** use a sentinel-file handshake between parent and chaser. PowerShell startup can take 2–5 seconds; a fixed `Sleep 600ms` before the keystroke is unreliable. The chaser writes a ready file after snapshotting baselines; the parent waits for that file before firing the keystroke.
 
 ### 3. Temp files: `$env:TEMP`, not `$PSScriptRoot`
 
@@ -103,7 +119,7 @@ Naively, you'd watch for new `java.exe` processes via WMI to detect a test run. 
 | Symptom | Cause |
 |---|---|
 | `IntelliJ IDEA not found` | IntelliJ minimized to system tray, hidden, or not running. |
-| `[chaser] no new test results XML appeared within 120s` | Shift+F9 didn't reach IntelliJ (modal dialog, not ready), or tests took longer than 120s. |
+| `[chaser] no IntelliJ test runner detected within 30s` | Shift+F9 didn't reach IntelliJ (modal dialog, not ready), or no run config selected. Increase with `-DetectionWindowSec`. Long-running tests are *not* a cause — once the JVM starts, the chaser waits with no timeout. |
 | `=== LOG FILE: not found ===` followed by HINT | Run config is missing one or both of "Save console output to file" / `-Dlogging.file.name`. |
 | `[FAIL] foo (?)` with no stderr | Test never actually ran — usually a Spring/JUnit bootstrap failure. Check the LOG FILE section for the root cause (e.g. Testcontainer dependency unavailable). |
 

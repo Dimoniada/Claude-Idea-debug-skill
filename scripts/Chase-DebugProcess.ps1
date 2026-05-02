@@ -1,6 +1,7 @@
 param(
-    [string]$LogFile         = "$PWD\debug-capture.log",
-    [int]$WaitForProcessSec  = 120,
+    [string]$LogFile           = "$PWD\debug-capture.log",
+    [int]$DetectionWindowSec   = 30,
+    [string]$ReadyFile         = "",
     [switch]$MinimizeIntelliJ
 )
 
@@ -9,45 +10,102 @@ param(
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding            = [System.Text.Encoding]::UTF8
 
+# --- Locate IntelliJ test history directory ---
 $ideaDir = Get-ChildItem "$env:LOCALAPPDATA\JetBrains" -Filter "IntelliJIdea*" -Directory |
     Sort-Object Name -Descending | Select-Object -First 1 -ExpandProperty FullName
 $testHistoryDir = "$ideaDir\testHistory"
 
-# Snapshot all existing XMLs and their timestamps before the run starts
-$baseline = @{}
+# --- Snapshot baselines BEFORE the parent fires Shift+F9 ---
+$baselineXml = @{}
 Get-ChildItem "$testHistoryDir\*\*.xml" -ErrorAction SilentlyContinue | ForEach-Object {
-    $baseline[$_.FullName] = $_.LastWriteTime
+    $baselineXml[$_.FullName] = $_.LastWriteTime
 }
+$baselinePids = @((Get-CimInstance Win32_Process -Filter "Name='java.exe'" -ErrorAction SilentlyContinue).ProcessId)
 
-Write-Host "[chaser] armed, watching for new test results XML..."
+# Signal parent: baselines captured, safe to fire the keystroke now
+if ($ReadyFile) { '' | Out-File $ReadyFile -Encoding ASCII }
 
-$deadline = (Get-Date).AddSeconds($WaitForProcessSec)
-$latest   = $null
+Write-Host "[chaser] armed. Detection window: ${DetectionWindowSec}s for test runner to start."
 
-while ((Get-Date) -lt $deadline) {
+# --- Phase 1: detect IntelliJ test/app-runner java.exe OR an early XML ---
+# idea_rt.jar appears in many IntelliJ-spawned JVMs. Exclude the infrastructure
+# daemons (build, Maven server, Kotlin daemon, etc.) that also include it but
+# are NOT the test/run target — they're long-living and would hang Phase 2.
+$infraPattern = 'BuildMain|jps-launcher|RemoteMavenServer|kotlin\.daemon|MavenServerCmdReader|JpsBootstrap'
+
+$detectionDeadline = (Get-Date).AddSeconds($DetectionWindowSec)
+$testProcess = $null
+$earlyXml    = $null
+
+while ((Get-Date) -lt $detectionDeadline) {
     Start-Sleep -Milliseconds 500
+
+    # New java.exe with IntelliJ's test-runner classpath, but not infra?
+    $currentJava = Get-CimInstance Win32_Process -Filter "Name='java.exe'" -ErrorAction SilentlyContinue
+    foreach ($proc in $currentJava) {
+        if ($proc.ProcessId -in $baselinePids) { continue }
+        if ($proc.CommandLine -match 'idea_rt\.jar' -and $proc.CommandLine -notmatch $infraPattern) {
+            $testProcess = Get-Process -Id $proc.ProcessId -ErrorAction SilentlyContinue
+            if ($testProcess) {
+                Write-Host "[chaser] test runner detected, PID $($proc.ProcessId)"
+                break
+            }
+        }
+    }
+    if ($testProcess) { break }
+
+    # Or an XML appeared faster than we could see the JVM
     $candidate = Get-ChildItem "$testHistoryDir\*\*.xml" -ErrorAction SilentlyContinue |
         Where-Object {
-            -not $baseline.ContainsKey($_.FullName) -or
-            $_.LastWriteTime -gt $baseline[$_.FullName]
+            -not $baselineXml.ContainsKey($_.FullName) -or
+            $_.LastWriteTime -gt $baselineXml[$_.FullName]
         } |
         Sort-Object LastWriteTime -Descending |
         Select-Object -First 1
-
     if ($candidate) {
-        # Wait a moment to let IntelliJ finish writing the file
-        Start-Sleep -Milliseconds 1500
-        $latest = Get-Item $candidate.FullName
-        Write-Host "[chaser] new results: $($latest.Name)"
+        $earlyXml = $candidate
+        Write-Host "[chaser] test results appeared early: $($candidate.Name)"
         break
     }
 }
 
-if (-not $latest) {
-    Write-Error "[chaser] no new test results XML appeared within ${WaitForProcessSec}s"
+if (-not $testProcess -and -not $earlyXml) {
+    Write-Error "[chaser] no IntelliJ test runner detected within ${DetectionWindowSec}s. Shift+F9 may not have reached IntelliJ (modal dialog, focus issue, no run config selected). Increase with -DetectionWindowSec."
     exit 1
 }
 
+# --- Phase 2: wait for test runner to exit, with heartbeat (no timeout) ---
+if ($testProcess) {
+    $start    = Get-Date
+    $lastBeat = $start
+    Write-Host "[chaser] waiting for test runner to exit..."
+    while (-not $testProcess.HasExited) {
+        Start-Sleep -Milliseconds 500
+        $now = Get-Date
+        if (($now - $lastBeat).TotalSeconds -ge 10) {
+            $elapsed = [int]($now - $start).TotalSeconds
+            Write-Host "[chaser] still running... ${elapsed}s elapsed"
+            $lastBeat = $now
+        }
+    }
+    $totalSec = [int]((Get-Date) - $start).TotalSeconds
+    Write-Host "[chaser] test runner exited after ${totalSec}s"
+    Start-Sleep -Milliseconds 1500  # give IntelliJ time to finalize the XML
+}
+
+# --- Phase 3: find the test-results XML (latest new/modified) ---
+$latest = $earlyXml
+if (-not $latest) {
+    $latest = Get-ChildItem "$testHistoryDir\*\*.xml" -ErrorAction SilentlyContinue |
+        Where-Object {
+            -not $baselineXml.ContainsKey($_.FullName) -or
+            $_.LastWriteTime -gt $baselineXml[$_.FullName]
+        } |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+}
+
+# --- Output: log file ---
 if (Test-Path $LogFile) {
     Write-Host "[chaser] === LOG FILE: $LogFile ==="
     Get-Content $LogFile
@@ -58,29 +116,34 @@ if (Test-Path $LogFile) {
     Write-Host "[chaser]   2. VM options -> -Dlogging.file.name=<path>  (for Spring Boot apps)"
 }
 
-Write-Host "`n[chaser] === TEST HISTORY XML: $($latest.FullName) ==="
-$raw  = ([System.IO.File]::ReadAllText($latest.FullName, [System.Text.Encoding]::UTF8)) -replace 'version="1\.1"','version="1.0"'
-[xml]$xml = $raw
-$counts = @{}
-$xml.SelectNodes("//count") | ForEach-Object { $counts[$_.name] = $_.value }
-$total  = $counts['total']
-$passed = if ($counts['passed']) { $counts['passed'] } else { '0' }
-$failed = if ($counts['failed']) { $counts['failed'] } else { '0' }
-Write-Host "Total: $total  Passed: $passed  Failed: $failed"
-Write-Host ""
-foreach ($test in $xml.testrun.test) {
-    $icon = if ($test.status -eq 'passed') { 'PASS' } else { 'FAIL' }
-    $dur  = if ($test.duration) { "$($test.duration)ms" } else { '?' }
-    Write-Host "[$icon] $($test.name) ($dur)"
-    if ($test.status -ne 'passed') {
-        $test.output | Where-Object type -eq 'stderr' | ForEach-Object { Write-Host $_.'#text' }
+# --- Output: test results (if any) ---
+if ($latest) {
+    Write-Host "`n[chaser] === TEST HISTORY XML: $($latest.FullName) ==="
+    $raw  = ([System.IO.File]::ReadAllText($latest.FullName, [System.Text.Encoding]::UTF8)) -replace 'version="1\.1"','version="1.0"'
+    [xml]$xml = $raw
+    $counts = @{}
+    $xml.SelectNodes("//count") | ForEach-Object { $counts[$_.name] = $_.value }
+    $total  = $counts['total']
+    $passed = if ($counts['passed']) { $counts['passed'] } else { '0' }
+    $failed = if ($counts['failed']) { $counts['failed'] } else { '0' }
+    Write-Host "Total: $total  Passed: $passed  Failed: $failed"
+    Write-Host ""
+    foreach ($test in $xml.testrun.test) {
+        $icon = if ($test.status -eq 'passed') { 'PASS' } else { 'FAIL' }
+        $dur  = if ($test.duration) { "$($test.duration)ms" } else { '?' }
+        Write-Host "[$icon] $($test.name) ($dur)"
+        if ($test.status -ne 'passed') {
+            $test.output | Where-Object type -eq 'stderr' | ForEach-Object { Write-Host $_.'#text' }
+        }
     }
+} else {
+    Write-Host "`n[chaser] (no new test results XML - may have been a build-only or non-test debug run)"
 }
 
+# --- Minimize IntelliJ so Claude Code surfaces ---
 if ($MinimizeIntelliJ) {
     $ideaHandles = [WinApiShared]::FindByClass("SunAwtFrame")
     if ($ideaHandles.Count -gt 0) {
-        # SW_MINIMIZE = 6; cross-process call, no focus-stealing required
         [WinApiShared]::ShowWindow($ideaHandles[0], 6) | Out-Null
         Write-Host "[chaser] IntelliJ minimized; Claude Code surfaces"
     }

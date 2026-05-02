@@ -5,7 +5,7 @@ description: Trigger an IntelliJ IDEA debug/test run from Claude Code on Windows
 
 # idea-debug
 
-Wraps a PowerShell toolkit that sends Shift+F9 to IntelliJ IDEA, waits for a new test-results XML to appear, and pipes the console log plus the parsed test results back into Claude Code's terminal.
+Wraps a PowerShell toolkit that sends the user's configured "Debug" shortcut (default Shift+F9) to IntelliJ IDEA, detects the spawned test-runner JVM, waits for it to exit, and pipes the console log plus the parsed JUnit results back into Claude Code's terminal.
 
 ## Trigger
 
@@ -57,18 +57,24 @@ The script accepts a `-KeyDebug` parameter in WshShell.SendKeys notation: `+` = 
 
 ## What the script does
 
-1. Spawns `Chase-DebugProcess.ps1` as a background watcher with `Start-Process -RedirectStandardOutput`. Temp files live in `$env:TEMP` so the skill directory does not need to be writable.
-2. The watcher snapshots existing `*.xml` files in `%LOCALAPPDATA%\JetBrains\IntelliJIdea*\testHistory\`, then polls for a new or modified XML.
-3. The parent uses `BringToForeground` (AttachThreadInput + SetForegroundWindow) to surface IntelliJ.
-4. The parent writes a tiny `.vbs` and runs it via `wscript.exe`, which sends `Shift+F9` from the **interactive user session**. The keypress would be silently dropped if sent from the non-interactive PowerShell subprocess.
-5. The watcher detects the new testHistory XML, reads `debug-capture.log`, and parses the XML to print pass/fail counts and per-test results.
-6. The watcher minimizes IntelliJ via `ShowWindow(SW_MINIMIZE)`. This is a cross-process call that does NOT require focus-stealing privileges, and the next window in the Z-order (Claude Code) surfaces naturally — without burning the user's Alt+Tab MRU slot.
+1. Spawns `Chase-DebugProcess.ps1` as a background watcher (`Start-Process -NoNewWindow`, no stdout/stderr redirection — the chaser prints live into the same console as the parent).
+2. The watcher snapshots existing `*.xml` files in `%LOCALAPPDATA%\JetBrains\IntelliJIdea*\testHistory\` AND existing `java.exe` PIDs, then writes a sentinel "ready" file in `$env:TEMP`.
+3. The parent **waits for the sentinel** before sending the keystroke (eliminates the race where slow PowerShell startup means the chaser hasn't snapshotted yet).
+4. The parent uses `BringToForeground` (AttachThreadInput + SetForegroundWindow) to surface IntelliJ.
+5. The parent writes a tiny `.vbs` and runs it via `wscript.exe`, which sends `$KeyDebug` (default `+{F9}`) from the **interactive user session**. The keypress would be silently dropped if sent from the non-interactive PowerShell subprocess.
+6. The watcher polls for either: (a) a new `java.exe` whose command-line contains `idea_rt.jar` AND does NOT match an infrastructure pattern (BuildMain, jps-launcher, kotlin.daemon, etc.), or (b) a new/modified testHistory XML (fallback for sub-second tests where the JVM disappears between polls). Detection times out after `-DetectionWindowSec` (default 30s).
+7. Once the test-runner JVM is detected, the watcher waits for it to exit — **with no timeout** — printing a `[chaser] still running... Ns elapsed` heartbeat every 10 seconds.
+8. After exit (plus a 1.5s grace for IntelliJ to finalize the XML), the watcher reads `debug-capture.log` and parses the latest test-history XML to print pass/fail counts and per-test results.
+9. The watcher minimizes IntelliJ via `ShowWindow(SW_MINIMIZE)`. This is a cross-process call that does NOT require focus-stealing privileges, and the next window in the Z-order (Claude Code) surfaces naturally — without burning the user's Alt+Tab MRU slot.
 
 ## Design notes (do not undo)
 
 - **Use `wscript.exe` for SendKeys, not `WScript.Shell.SendKeys` directly or `keybd_event`.** Both fail when called from Claude Code's non-interactive subprocess. `wscript.exe` runs at the top of the process tree with interactive desktop access.
 - **Use temp files in `$env:TEMP`, not `$PSScriptRoot`.** Skill directories may not be writable from non-interactive subprocesses.
-- **Watch for new testHistory XML, not for a new `java.exe` process.** IntelliJ reuses an existing JVM (e.g. Zulu) as a test runner daemon — no new process spawns, so a `WMI __InstanceCreationEvent` watcher misses everything.
+- **Use a sentinel-file handshake, not a fixed sleep.** The chaser writes a ready-file after snapshotting baselines; the parent waits for it before firing the keystroke. PowerShell startup can take 2–5 seconds — without the handshake, fast tests finish before the chaser even snapshots, polluting the baseline.
+- **Filter `java.exe` by classpath AND exclude infrastructure.** IntelliJ DOES spawn a fresh `java.exe` per test/run (with `idea_rt.jar` in the classpath). But its own daemons (JPS BuildMain, jps-launcher, RemoteMavenServer, kotlin.daemon, MavenServerCmdReader, JpsBootstrap) ALSO include `idea_rt.jar` and are long-living — without exclusion, the watcher locks onto the build daemon and hangs forever. Use the early-XML check as a fallback for tests that finish faster than 500ms (the JVM exits between two polls).
+- **No timeout once the test JVM is detected.** Detection itself has `-DetectionWindowSec` (default 30s), but once we have a process handle we `WaitForExit` indefinitely with a 10s heartbeat. Long-running suites (Spring Boot, Testcontainers) work without ceremony.
+- **Don't redirect chaser stdout.** The original implementation captured chaser output to a file and printed it after `WaitForExit`. That hides progress and breaks the heartbeat. Use `-NoNewWindow` so the chaser shares the parent's console and prints live.
 - **Minimize IntelliJ to return focus, do not try to bring Claude Code forward.** Cross-process focus-stealing is blocked by Windows from a deep subprocess (just flashes the taskbar icon). Minimizing the foreground window is unrestricted and lets the previous window surface cleanly.
 
 ## Reading the output
@@ -108,14 +114,14 @@ The user must configure these once per project in the IntelliJ Run/Debug Configu
 
 The chaser will print this exact hint if it can't find the log file after a run.
 
-IntelliJ must be open, not minimized to tray, with a recent run config so Shift+F9 has something to re-run.
+IntelliJ must be open, not minimized to tray, with a recent run config so the Debug shortcut has something to re-run.
 
 ## Failure modes
 
 | Symptom | Likely cause |
 |---|---|
 | `IntelliJ IDEA not found` | IntelliJ is minimized to tray, hidden, or not running. Open and restore it. (Note: minimized to taskbar is fine; minimized to tray is not.) |
-| `[chaser] no new test results XML appeared within 120s` | Shift+F9 didn't reach IntelliJ (a modal dialog ate it, or IntelliJ wasn't ready), or tests took longer than 120s. Retry, or raise `-WaitForProcessSec`. |
+| `[chaser] no IntelliJ test runner detected within Ns` | Shift+F9 didn't reach IntelliJ (modal dialog, focus issue, no run config selected). Long-running tests are NOT the cause — once the JVM is detected, the chaser waits with no timeout. Raise the initial window with `-DetectionWindowSec`. |
 | `[chaser] no log file found` (with HINT) | The run config is missing one or both of "Save console output to file" / `-Dlogging.file.name`. Follow the hint. |
 | `cannot be loaded because running scripts is disabled` | The skill was invoked with `& "...ps1"` instead of `powershell -ExecutionPolicy Bypass -File`. |
 | Empty test results section | Last run wasn't a JUnit test run. Normal for build-only runs. |
