@@ -30,37 +30,30 @@ Do not use `& "...ps1"` — that subjects the script to the system's execution p
 
 The `-File` parameter inherits the parent shell's working directory, so `$PWD` inside the script resolves to the user's project folder. `$PSScriptRoot` resolves to the skill's `scripts/` folder, so it correctly finds `Chase-DebugProcess.ps1` and `WinApi.ps1`.
 
-## Configuration (you, Claude, manage this in memory)
+## Configuration (per-conversation prompt)
 
-The script accepts a `-KeyDebug` parameter in WshShell.SendKeys notation: `+` = Shift, `%` = Alt, `^` = Ctrl. Examples: `+{F9}` = Shift+F9, `+%{F10}` = Shift+Alt+F10, `^{F9}` = Ctrl+F9. The script's default is `+{F9}` (IntelliJ's stock "Re-run Debug").
+The script accepts a `-KeyDebug` parameter in WshShell.SendKeys notation: `+` = Shift, `%` = Alt, `^` = Ctrl. Examples: `+{F9}` = Shift+F9 (default), `+%{F10}` = Shift+Alt+F10, `^{F9}` = Ctrl+F9.
 
-**The user's preferred shortcut lives in your memory file `idea-debug-prefs.md`** (in the same `memory/` folder as your other project memory files). Format:
+**Protocol — ask once per conversation, then remember within the conversation:**
 
-```
----
-name: idea-debug user preferences
-description: User's preferred IntelliJ keyboard shortcut for /idea-debug
-type: project
----
+1. The **first time** the user invokes `/idea-debug` in this conversation, do NOT run the script yet. Ask:
 
-KeyDebug: +{F9}
-```
+   > "What's your IntelliJ shortcut for 'Re-run Debug'? Default is Shift+F9 (`+{F9}`).
+   >
+   > Reply 'default', OR a human-readable form (e.g. 'Shift+Alt+F10', 'Ctrl+F9'), OR raw SendKeys notation (e.g. `+%{F10}`, `^{F9}`)."
 
-**Protocol on every invocation of `/idea-debug`:**
+   Accept any of these input forms:
+   - "default" / "yes" / empty → use `+{F9}`
+   - Human-readable like "Shift+Alt+F10" → translate to SendKeys (`+` Shift, `%` Alt, `^` Ctrl): `+%{F10}`
+   - Already-formatted SendKeys notation (starts with `+`, `%`, `^`, or `{`) → use as-is
 
-1. **Before running the script**, check whether `idea-debug-prefs.md` exists in your project memory.
-2. **If it exists**, parse the `KeyDebug:` line and pass it as `-KeyDebug "<value>"` to the script.
-3. **If it does NOT exist** (first run for this project), do NOT run the script yet. Instead, ask the user:
+   Pass the resulting value as `-KeyDebug "<value>"` to the script. Remember it for the rest of this conversation.
 
-   > "I haven't seen idea-debug used in this project before. The default IntelliJ shortcut for 'Re-run Debug' is Shift+F9 (`+{F9}`). Reply 'keep default' to use it, or tell me your shortcut (e.g. 'Shift+Alt+F10', 'Ctrl+F9')."
+2. On **every subsequent `/idea-debug` in the same conversation**, reuse the remembered value silently — do NOT ask again.
 
-   When they answer:
-   - Translate their answer to SendKeys notation (`Shift+Alt+F10` → `+%{F10}`, etc.)
-   - Create `idea-debug-prefs.md` with the chosen value
-   - Add a line to `MEMORY.md` index: `- [idea-debug-prefs](idea-debug-prefs.md) — IntelliJ keyboard shortcut for the idea-debug skill`
-   - Then run the script with `-KeyDebug "<value>"`
+3. If the user explicitly says they want to change the shortcut mid-conversation, ask once and use the new value going forward.
 
-4. **If the user later asks to change the shortcut**, update `idea-debug-prefs.md` and use the new value next invocation.
+4. **Do NOT persist the value** to any memory file or config. It is conversation-scoped. The next conversation will ask again — that is intentional.
 
 ## What the script does
 

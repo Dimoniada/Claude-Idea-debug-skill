@@ -48,11 +48,11 @@ Triggering IntelliJ from a Claude Code subprocess on Windows runs into several n
 
 ## Configuration
 
-The keyboard shortcut sent to IntelliJ is configurable. Default is `Shift+F9` (IntelliJ's stock "Re-run Debug").
+Default IntelliJ shortcut: `Shift+F9` (IntelliJ's stock "Re-run Debug").
 
-**Claude remembers your shortcut in its project memory** (file `idea-debug-prefs.md` next to your other memory files). On the first invocation in a project Claude will ask you which shortcut you use and save it. Subsequent runs use it silently. To change it later, just tell Claude (e.g. "switch my idea-debug shortcut to Ctrl+F9").
+**Per-conversation prompt:** the first time you invoke `/idea-debug` in a Claude conversation, Claude asks which shortcut to use. The answer is remembered for the rest of that conversation, then forgotten. Each new conversation asks again — useful if you debug different things with different shortcuts.
 
-**One-off override** without changing memory: pass `-KeyDebug` to the script, e.g.
+**One-off override** when invoking the script directly:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File "...\Debug-And-Capture.ps1" -KeyDebug "+%{F10}"
