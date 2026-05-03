@@ -98,12 +98,14 @@ The full path is shown so the user can open the XML directly. If a `[FAIL]` show
 ## What to do with the output
 
 1. **Summarize the result first**: pass/fail counts if tests ran, or build success/failure otherwise. One or two lines.
-2. **Identify the actual problem.** Look at:
+2. **Read the XML file.** The chaser prints the full path as `=== TEST HISTORY XML: <path> ===`. Always read that file with the Read tool — it contains `<output type="stdout">` blocks with the full JVM console output (Testcontainers errors, Spring context failures, stack traces) that are NOT echoed by the chaser script. Extract any error messages, stack traces, or `Caused by:` lines and include them verbatim in your response.
+3. **Identify the actual problem.** Look at:
    - Compiler errors (line numbers, file paths)
    - Test failures and their stderr
+   - `Caused by:` lines and stack traces from the XML stdout blocks
    - Stack traces in the console log
-3. **Suggest concrete fixes.** Reference specific files and line numbers from the project where possible. If a test failed, name the test and explain why.
-4. **Stop.** Do not re-run the skill automatically. Wait for the user to apply a fix and ask again.
+4. **Suggest concrete fixes.** Reference specific files and line numbers from the project where possible. If a test failed, name the test and explain why.
+5. **Stop.** Do not re-run the skill automatically. Wait for the user to apply a fix and ask again.
 
 ## Setup requirements (mention to user if a run fails)
 
