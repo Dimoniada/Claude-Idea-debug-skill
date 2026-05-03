@@ -121,7 +121,7 @@ IntelliJ does spawn a fresh `java.exe` per test/run with `idea_rt.jar` in its cl
 | `IntelliJ IDEA not found` | IntelliJ minimized to system tray, hidden, or not running. |
 | `[chaser] no IntelliJ test runner detected within 30s` | Shift+F9 didn't reach IntelliJ (modal dialog, not ready), or no run config selected. Increase with `-DetectionWindowSec`. Long-running tests are *not* a cause — once the JVM starts, the chaser waits with no timeout. |
 | `=== LOG FILE: not found ===` followed by HINT | Run config is missing one or both of "Save console output to file" / `-Dlogging.file.name`. |
-| `[FAIL] foo (?)` with no stderr | Test never actually ran — usually a Spring/JUnit bootstrap failure. Check the LOG FILE section for the root cause (e.g. Testcontainer dependency unavailable). |
+| `[FAIL] foo (?)` with no stderr | Test never actually ran — usually a Spring/JUnit bootstrap failure (e.g. Testcontainer unavailable, Spring context failed). Claude will automatically read the XML file and surface the stdout/stderr inline — look there for the `Caused by:` root cause. |
 
 ## Contributing
 
