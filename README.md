@@ -62,6 +62,19 @@ powershell -ExecutionPolicy Bypass -File "...\Debug-And-Capture.ps1" -KeyDebug "
 
 **SendKeys notation:** `+` = Shift, `%` = Alt, `^` = Ctrl. So `Shift+Alt+F10` → `+%{F10}`, `Ctrl+F9` → `^{F9}`.
 
+### Non-standard data directory (`-TestHistoryDir`)
+
+By default the skill locates IntelliJ's `testHistory` folder automatically, checking two standard paths in order:
+
+1. `%LOCALAPPDATA%\JetBrains\IntelliJIdea*\testHistory` — modern (2020+)
+2. `%USERPROFILE%\.IntelliJIdea*\system\testHistory` — legacy (2019 and earlier)
+
+If neither is found (custom `idea.system.path` in `idea.vmoptions`, or JetBrains Toolbox "Override data directory"), the chaser prints a warning. Pass the path explicitly:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "...\Debug-And-Capture.ps1" -TestHistoryDir "D:\MyData\JetBrains\testHistory"
+```
+
 ### Detection window (`-DetectionWindowSec`, default 30)
 
 After sending the keystroke, the chaser waits up to N seconds for IntelliJ to spawn the test-runner JVM (a `java.exe` whose command-line includes `idea_rt.jar`). Once detected, it waits for that JVM to exit — **with no timeout** — so long-running suites are fine. A heartbeat line is printed every 10 seconds while the test is running.
@@ -122,6 +135,7 @@ IntelliJ does spawn a fresh `java.exe` per test/run with `idea_rt.jar` in its cl
 | `[chaser] no IntelliJ test runner detected within 30s` | Shift+F9 didn't reach IntelliJ (modal dialog, not ready), or no run config selected. Increase with `-DetectionWindowSec`. Long-running tests are *not* a cause — once the JVM starts, the chaser waits with no timeout. |
 | `=== LOG FILE: not found ===` followed by HINT | Run config is missing one or both of "Save console output to file" / `-Dlogging.file.name`. |
 | `[FAIL] foo (?)` with no stderr | Test never actually ran — usually a Spring/JUnit bootstrap failure (e.g. Testcontainer unavailable, Spring context failed). Claude will automatically read the XML file and surface the stdout/stderr inline — look there for the `Caused by:` root cause. |
+| `[chaser] Could not find IntelliJ IDEA data directory` | Non-standard data directory: IntelliJ 2019 or earlier (legacy path not found), custom `idea.system.path` in `idea.vmoptions`, or JetBrains Toolbox "Override data directory". Pass the path manually via `-TestHistoryDir`. |
 
 ## Contributing
 
