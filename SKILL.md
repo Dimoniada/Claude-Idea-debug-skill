@@ -125,6 +125,7 @@ IntelliJ must be open, not minimized to tray, with a recent run config so the De
 | `IntelliJ IDEA not found` | IntelliJ is minimized to tray, hidden, or not running. Open and restore it. (Note: minimized to taskbar is fine; minimized to tray is not.) |
 | `[chaser] no IntelliJ test runner detected within Ns` | Shift+F9 didn't reach IntelliJ (modal dialog, focus issue, no run config selected). Long-running tests are NOT the cause — once the JVM is detected, the chaser waits with no timeout. Raise the initial window with `-DetectionWindowSec`. |
 | `[chaser] no log file found` (with HINT) | The run config is missing one or both of "Save console output to file" / `-Dlogging.file.name`. Follow the hint. |
+| `[chaser] Could not find IntelliJ IDEA data directory` | The user is on IntelliJ 2019 or earlier (legacy path not found), OR has a custom `idea.system.path` set in `idea.vmoptions`/`idea.properties`, OR uses JetBrains Toolbox with "Override data directory". Ask the user for the path to their `testHistory` folder and pass it as `-TestHistoryDir "<path>"` to both scripts. |
 | `cannot be loaded because running scripts is disabled` | The skill was invoked with `& "...ps1"` instead of `powershell -ExecutionPolicy Bypass -File`. |
 | Empty test results section | Last run wasn't a JUnit test run. Normal for build-only runs. |
 
@@ -135,3 +136,4 @@ IntelliJ must be open, not minimized to tray, with a recent run config so the De
 - Do not hallucinate test results if the chaser output is empty — say the run produced no parseable output and ask the user to check IntelliJ.
 - Do not copy the scripts out of the skill into the project folder. They run fine in place.
 - Do not pass a `-LogFile` parameter unless the user explicitly asks for the log to be written somewhere other than the project root — the default (`$PWD\debug-capture.log`) is correct.
+- Do not pass a `-TestHistoryDir` parameter unless the chaser warned it could not find the data directory automatically — the auto-detection covers the standard modern and legacy paths.

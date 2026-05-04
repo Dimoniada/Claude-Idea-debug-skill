@@ -2,6 +2,7 @@ param(
     [string]$LogFile           = "$PWD\debug-capture.log",
     [int]$DetectionWindowSec   = 30,
     [string]$ReadyFile         = "",
+    [string]$TestHistoryDir    = "",   # override auto-detected path
     [switch]$MinimizeIntelliJ
 )
 
@@ -11,9 +12,27 @@ param(
 $OutputEncoding            = [System.Text.Encoding]::UTF8
 
 # --- Locate IntelliJ test history directory ---
-$ideaDir = Get-ChildItem "$env:LOCALAPPDATA\JetBrains" -Filter "IntelliJIdea*" -Directory |
-    Sort-Object Name -Descending | Select-Object -First 1 -ExpandProperty FullName
-$testHistoryDir = "$ideaDir\testHistory"
+# Explicit override wins; otherwise try modern path (IntelliJ 2020+), then legacy (pre-2020).
+# Custom idea.system.path in idea.vmoptions/idea.properties is not handled automatically —
+# if both standard locations miss, pass -TestHistoryDir '<path>\testHistory' explicitly.
+if ($TestHistoryDir) {
+    $testHistoryDir = $TestHistoryDir
+} else {
+    $ideaDir = Get-ChildItem "$env:LOCALAPPDATA\JetBrains" -Filter "IntelliJIdea*" -Directory -ErrorAction SilentlyContinue |
+        Sort-Object Name -Descending | Select-Object -First 1 -ExpandProperty FullName
+
+    if (-not $ideaDir) {
+        # Legacy path used by IntelliJ 2019 and earlier
+        $ideaDir = Get-ChildItem "$env:USERPROFILE" -Filter ".IntelliJIdea*" -Directory -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending | Select-Object -First 1 |
+            ForEach-Object { Join-Path $_.FullName "system" }
+    }
+
+    if (-not $ideaDir) {
+        Write-Warning "[chaser] Could not find IntelliJ IDEA data directory under LOCALAPPDATA\JetBrains or USERPROFILE\.IntelliJIdea*. If you use a custom idea.system.path, pass -TestHistoryDir '<path>\testHistory' to this script."
+    }
+    $testHistoryDir = if ($ideaDir) { "$ideaDir\testHistory" } else { "" }
+}
 
 # --- Snapshot baselines BEFORE the parent fires Shift+F9 ---
 $baselineXml = @{}
