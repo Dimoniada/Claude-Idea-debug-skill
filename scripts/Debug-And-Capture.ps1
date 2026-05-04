@@ -7,6 +7,17 @@ param(
 
 . "$PSScriptRoot\WinApi.ps1"
 
+# Fail fast BEFORE spawning the chaser - distinguish "not running" from "hidden".
+if (-not (Get-Process -Name idea64, idea -ErrorAction SilentlyContinue)) {
+    Write-Error "IntelliJ IDEA is not running. Start it (with your project open and a Run/Debug config selected), then try again."
+    exit 1
+}
+$ideaHandles = [WinApiShared]::FindByClass("SunAwtFrame")
+if ($ideaHandles.Count -eq 0) {
+    Write-Error "IntelliJ IDEA is running but no visible window was found. It may be minimized to the system tray - restore it from the tray and try again."
+    exit 1
+}
+
 if (Test-Path $LogFile) { Remove-Item $LogFile -Force }
 
 # Sentinel file: chaser touches this once it has snapshotted baselines
@@ -31,14 +42,8 @@ if (-not (Test-Path $readyFile)) {
 }
 Remove-Item $readyFile -Force -ErrorAction SilentlyContinue
 
-# Bring IntelliJ forward and send the keystroke
-$handles = [WinApiShared]::FindByClass("SunAwtFrame")
-if ($handles.Count -eq 0) {
-    $chaser | Stop-Process -Force
-    Write-Error "IntelliJ IDEA not found"
-    exit 1
-}
-Invoke-BringToForeground $handles[0]
+# Bring IntelliJ forward and send the keystroke (handle was found upfront)
+Invoke-BringToForeground $ideaHandles[0]
 
 # SendKeys via fresh wscript.exe (interactive user session)
 $vbs = "$env:TEMP\idea-send-key.vbs"

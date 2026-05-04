@@ -122,7 +122,8 @@ IntelliJ must be open, not minimized to tray, with a recent run config so the De
 
 | Symptom | Likely cause |
 |---|---|
-| `IntelliJ IDEA not found` | IntelliJ is minimized to tray, hidden, or not running. Open and restore it. (Note: minimized to taskbar is fine; minimized to tray is not.) |
+| `IntelliJ IDEA is not running.` | No `idea64.exe` / `idea.exe` process at all. Start IntelliJ. |
+| `IntelliJ IDEA is running ... but no visible window was found.` | Process is up but minimized to system tray. Restore it from the tray. (Minimized to the taskbar is fine — only tray-minimized counts as hidden.) |
 | `[chaser] no IntelliJ test runner detected within Ns` | Shift+F9 didn't reach IntelliJ (modal dialog, focus issue, no run config selected). Long-running tests are NOT the cause — once the JVM is detected, the chaser waits with no timeout. Raise the initial window with `-DetectionWindowSec`. |
 | `[chaser] no log file found` (with HINT) | The run config is missing one or both of "Save console output to file" / `-Dlogging.file.name`. Follow the hint. |
 | `[chaser] Could not find IntelliJ IDEA data directory` | The user is on IntelliJ 2019 or earlier (legacy path not found), OR has a custom `idea.system.path` set in `idea.vmoptions`/`idea.properties`, OR uses JetBrains Toolbox with "Override data directory". Ask the user for the path to their `testHistory` folder and pass it as `-TestHistoryDir "<path>"` to both scripts. |
